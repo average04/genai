@@ -6,7 +6,7 @@ public class SongResult
     public string Title          { get; set; } = default!;
     public string Artist         { get; set; } = default!;
     public string Album          { get; set; } = default!;
-    public int    DurationSeconds { get; set; }
+    public double DurationSeconds { get; set; }
     public string? CoverImageUrl { get; set; }
 
     // Lyrics

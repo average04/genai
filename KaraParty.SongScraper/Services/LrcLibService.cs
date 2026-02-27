@@ -9,7 +9,7 @@ public class LrcLibService
     private readonly HttpClient _http = new() { BaseAddress = new Uri("https://lrclib.net/api/") };
 
     public async Task<(bool found, string? rawLrc, List<LrcLine> lines)> GetLyricsAsync(
-        string title, string artist, int durationSeconds)
+        string title, string artist, double durationSeconds)
     {
         var query = $"search?q={Uri.EscapeDataString($"{title} {artist}")}";
         var results = await _http.GetFromJsonAsync<List<LrcLibResult>>(query);
@@ -61,6 +61,6 @@ public class LrcLibService
     private class LrcLibResult
     {
         [JsonPropertyName("syncedLyrics")] public string? SyncedLyrics { get; set; }
-        [JsonPropertyName("duration")]     public int     Duration     { get; set; }
+        [JsonPropertyName("duration")]     public double  Duration     { get; set; }
     }
 }
