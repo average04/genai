@@ -4,9 +4,9 @@ using System.Text.Json.Serialization;
 
 namespace KaraParty.SongScraper.Services;
 
-public class LrcLibService
+public class LrcLibService(HttpClient http)
 {
-    private readonly HttpClient _http = new() { BaseAddress = new Uri("https://lrclib.net/api/") };
+    private readonly HttpClient _http = http;
 
     public async Task<(bool found, string? rawLrc, List<LrcLine> lines)> GetLyricsAsync(
         string title, string artist, double durationSeconds)
@@ -25,6 +25,10 @@ public class LrcLibService
         return (true, match.SyncedLyrics, lines);
     }
 
+    // Matches <mm:ss.xx> inline word-timestamp tokens in enhanced LRC
+    private static readonly System.Text.RegularExpressions.Regex WordTokenRegex =
+        new(@"<(\d{2}:\d{2}\.\d{2})>([^<\[]*)", System.Text.RegularExpressions.RegexOptions.Compiled);
+
     private static List<LrcLine> ParseLrc(string lrc)
     {
         var lines  = new List<LrcLine>();
@@ -36,11 +40,35 @@ public class LrcLibService
             if (close == -1) continue;
 
             var timestamp = trimmed[1..close];
-            var text      = trimmed[(close + 1)..].Trim();
-            if (string.IsNullOrEmpty(text)) continue;
+            var rest      = trimmed[(close + 1)..];
+            if (!TryParseTimestamp(timestamp, out var lineStart)) continue;
 
-            if (TryParseTimestamp(timestamp, out var seconds))
-                lines.Add(new LrcLine(seconds, text));
+            // Enhanced LRC: rest contains <mm:ss.xx>word tokens
+            if (rest.Contains('<'))
+            {
+                var words = new List<LrcWord>();
+                foreach (System.Text.RegularExpressions.Match m in WordTokenRegex.Matches(rest))
+                {
+                    var wordText = m.Groups[2].Value.Trim();
+                    if (string.IsNullOrEmpty(wordText)) continue;
+                    if (TryParseTimestamp(m.Groups[1].Value, out var wordStart))
+                        words.Add(new LrcWord(wordStart, null, wordText));
+                }
+
+                // Set End = next word's Start
+                for (var i = 0; i < words.Count - 1; i++)
+                    words[i] = words[i] with { End = words[i + 1].Start };
+
+                var plainText = System.Text.RegularExpressions.Regex.Replace(rest, @"<[^>]+>", "").Trim();
+                if (!string.IsNullOrEmpty(plainText) || words.Count > 0)
+                    lines.Add(new LrcLine(lineStart, plainText, words.Count > 0 ? words : null));
+            }
+            else
+            {
+                var text = rest.Trim();
+                if (!string.IsNullOrEmpty(text))
+                    lines.Add(new LrcLine(lineStart, text));
+            }
         }
         return lines;
     }

@@ -27,11 +27,10 @@ public class AiEnrichmentService(IChatClient ai)
             }
             """;
 
-        var result = await ai.GetResponseAsync([new ChatMessage(ChatRole.User, prompt)]);
-        var json   = result.Message.Text!.Trim().Trim('`').Replace("json\n", "").Trim();
-
         try
         {
+            var result = await ai.GetResponseAsync([new ChatMessage(ChatRole.User, prompt)]);
+            var json   = result.Message.Text!.Trim().Trim('`').Replace("json\n", "").Trim();
             var enrichment = JsonSerializer.Deserialize<AiEnrichment>(json, new JsonSerializerOptions
             {
                 PropertyNameCaseInsensitive = true
@@ -41,6 +40,66 @@ public class AiEnrichmentService(IChatClient ai)
         catch
         {
             return new AiEnrichment();
+        }
+    }
+
+    public async Task<List<LrcLine>> GenerateWordTimingsAsync(
+        string title, string artist, List<LrcLine> lines)
+    {
+        // Build a compact representation: index, start, end, text
+        var lineDescriptions = lines.Select((l, i) =>
+        {
+            var nextStart = i + 1 < lines.Count ? lines[i + 1].TimestampSeconds : l.TimestampSeconds + 5;
+            return $"{i}: [{l.TimestampSeconds:F2}s–{nextStart:F2}s] {l.Text}";
+        });
+        var linesBlock = string.Join("\n", lineDescriptions);
+
+        var prompt = $$"""
+            You are a music timing expert. Given lyric lines with known start and end timestamps,
+            estimate when each word starts within its line for the song "{{title}}" by {{artist}}.
+            Words must fall within their line's time range. Account for musical phrasing and natural
+            speech rhythm — short function words are typically brief, stressed syllables are longer.
+
+            Lyric lines (index: [start–end] text):
+            {{linesBlock}}
+
+            Return ONLY a valid JSON array. One object per line, in order:
+            [
+              { "words": [{ "text": "word", "start": 0.00 }, ...] },
+              ...
+            ]
+            """;
+
+        try
+        {
+            var result = await ai.GetResponseAsync([new ChatMessage(ChatRole.User, prompt)]);
+            var json   = result.Message.Text!.Trim().Trim('`').Replace("json\n", "").Trim();
+
+            var aiLines = JsonSerializer.Deserialize<List<AiWordLine>>(json, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+
+            if (aiLines is null || aiLines.Count != lines.Count)
+                return lines;
+
+            return lines.Select((line, i) =>
+            {
+                var aiWords = aiLines[i].Words;
+                if (aiWords is not { Count: > 0 }) return line;
+
+                var lrcWords = aiWords.Select((w, wi) => new LrcWord(
+                    w.Start,
+                    wi + 1 < aiWords.Count ? aiWords[wi + 1].Start : (double?)null,
+                    w.Text
+                )).ToList();
+
+                return line with { Words = lrcWords };
+            }).ToList();
+        }
+        catch
+        {
+            return lines;
         }
     }
 
@@ -67,11 +126,10 @@ public class AiEnrichmentService(IChatClient ai)
             Return the first 30 points only to keep the response concise.
             """;
 
-        var result = await ai.GetResponseAsync([new ChatMessage(ChatRole.User, prompt)]);
-        var json   = result.Message.Text!.Trim().Trim('`').Replace("json\n", "").Trim();
-
         try
         {
+            var result = await ai.GetResponseAsync([new ChatMessage(ChatRole.User, prompt)]);
+            var json   = result.Message.Text!.Trim().Trim('`').Replace("json\n", "").Trim();
             return JsonSerializer.Deserialize<List<PitchPoint>>(json, new JsonSerializerOptions
             {
                 PropertyNameCaseInsensitive = true
@@ -91,4 +149,15 @@ public class AiEnrichment
     public string? Genre             { get; set; }
     public string? KaraokeDifficulty { get; set; }
     public string? LyricsSummary     { get; set; }
+}
+
+file class AiWordLine
+{
+    public List<AiWord>? Words { get; set; }
+}
+
+file class AiWord
+{
+    public string Text  { get; set; } = "";
+    public double Start { get; set; }
 }

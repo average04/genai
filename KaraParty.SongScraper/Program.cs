@@ -1,66 +1,74 @@
+using Azure.Storage.Blobs;
 using KaraParty.SongScraper.Services;
+using MassTransit;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using OpenAI;
 using SpotifyAPI.Web;
 using System.ClientModel;
 
-// ── Configuration ────────────────────────────────────────────────────────────
-var config = new ConfigurationBuilder()
-    .AddJsonFile("appsettings.json")
-    .AddUserSecrets<Program>()
-    .Build();
+await Host.CreateDefaultBuilder(args)
+    .ConfigureAppConfiguration((_, cfg) =>
+    {
+        cfg.AddJsonFile("appsettings.json", optional: false, reloadOnChange: false);
+        cfg.AddUserSecrets<Program>(optional: true);
+        cfg.AddEnvironmentVariables();
+    })
+    .ConfigureServices((ctx, services) =>
+    {
+        var config = ctx.Configuration;
 
-var githubToken    = config["GitHubModels:Token"]!;
-var githubEndpoint = config["GitHubModels:Endpoint"]!;
-var githubModel    = config["GitHubModels:Model"]!;
-var spotifyClientId     = config["Spotify:ClientId"]!;
-var spotifyClientSecret = config["Spotify:ClientSecret"]!;
+        // ── Spotify Client (with automatic token refresh) ────────────────────
+        var spotifyClientId     = config["Spotify:ClientId"]!;
+        var spotifyClientSecret = config["Spotify:ClientSecret"]!;
+        services.AddSingleton(_ =>
+        {
+            var authenticator = new ClientCredentialsAuthenticator(spotifyClientId, spotifyClientSecret);
+            var spotifyConfig = SpotifyClientConfig.CreateDefault().WithAuthenticator(authenticator);
+            return new SpotifyClient(spotifyConfig);
+        });
 
-// ── Spotify Client ────────────────────────────────────────────────────────────
-var spotifyConfig = SpotifyClientConfig.CreateDefault();
-var request       = new ClientCredentialsRequest(spotifyClientId, spotifyClientSecret);
-var response      = await new OAuthClient(spotifyConfig).RequestToken(request);
-var spotify       = new SpotifyClient(spotifyConfig.WithToken(response.AccessToken));
+        // ── AI Client ────────────────────────────────────────────────────────
+        var githubToken    = config["GitHubModels:Token"]!;
+        var githubEndpoint = config["GitHubModels:Endpoint"]!;
+        var githubModel    = config["GitHubModels:Model"]!;
+        services.AddSingleton<IChatClient>(_ =>
+            new OpenAIClient(
+                new ApiKeyCredential(githubToken),
+                new OpenAIClientOptions { Endpoint = new Uri(githubEndpoint) })
+                .AsChatClient(githubModel));
 
-// ── GitHub Models AI Client ──────────────────────────────────────────────────
-IChatClient aiClient = new OpenAIClient(
-    new ApiKeyCredential(githubToken),
-    new OpenAIClientOptions { Endpoint = new Uri(githubEndpoint) })
-    .AsChatClient(githubModel);
+        // ── Azure Blob Storage ───────────────────────────────────────────────
+        services.AddSingleton(_ =>
+            new BlobServiceClient(config.GetConnectionString("BlobStorage")));
 
-// ── Services ─────────────────────────────────────────────────────────────────
-var spotifyService = new SpotifyService(spotify);
-var lrcService     = new LrcLibService();
-var aiService      = new AiEnrichmentService(aiClient);
-var scraper        = new SongScraperService(spotifyService, lrcService, aiService);
-var fileOutput     = new FileOutputService();
+        // ── Domain Services ──────────────────────────────────────────────────
+        services.AddTransient<AudioProcessingService>();
+        services.AddTransient<SpotifyService>();
+        services.AddHttpClient<LrcLibService>(client =>
+            client.BaseAddress = new Uri("https://lrclib.net/api/"));
+        services.AddTransient<AiEnrichmentService>();
+        services.AddTransient<SongScraperService>();
+        services.AddTransient<BlobUploadService>();
+        services.AddTransient<WhisperService>();
 
-// ── Run ───────────────────────────────────────────────────────────────────────
-Console.WriteLine("KaraParty Song Scraper");
-Console.WriteLine("======================");
-Console.Write("Paste a Spotify track URL: ");
-var url = Console.ReadLine()?.Trim();
+        // ── MassTransit / RabbitMQ ───────────────────────────────────────────
+        services.AddMassTransit(x =>
+        {
+            x.AddConsumer<SongScrapingRequestedConsumer>();
 
-if (string.IsNullOrEmpty(url))
-{
-    Console.WriteLine("No URL provided.");
-    return;
-}
-
-var result = await scraper.ScrapeAsync(url);
-
-Console.WriteLine();
-Console.WriteLine($"Title        : {result.Title}");
-Console.WriteLine($"Artist       : {result.Artist}");
-Console.WriteLine($"Album        : {result.Album}");
-Console.WriteLine($"Duration     : {result.DurationSeconds}s");
-Console.WriteLine($"Language     : {result.Language}");
-Console.WriteLine($"Mood         : {result.Mood}");
-Console.WriteLine($"Genre        : {result.Genre}");
-Console.WriteLine($"Difficulty   : {result.KaraokeDifficulty}");
-Console.WriteLine($"Summary      : {result.LyricsSummary}");
-Console.WriteLine($"Has LRC      : {result.HasSyncedLyrics}");
-Console.WriteLine($"Pitch ref pts: {result.PitchReference?.Count ?? 0}");
-
-await fileOutput.SaveAsync(result);
+            x.UsingRabbitMq((ctx2, cfg) =>
+            {
+                cfg.Host(config["RabbitMQ:Host"], config["RabbitMQ:VirtualHost"] ?? "/", h =>
+                {
+                    h.Username(config["RabbitMQ:Username"]!);
+                    h.Password(config["RabbitMQ:Password"]!);
+                });
+                cfg.ConfigureEndpoints(ctx2);
+            });
+        });
+    })
+    .Build()
+    .RunAsync();

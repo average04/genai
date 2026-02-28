@@ -1,0 +1,31 @@
+name: Deploy Scraper
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.x'
+
+      - name: Publish
+        run: |
+          dotnet publish KaraParty.SongScraper/KaraParty.SongScraper.csproj \
+            --configuration Release \
+            --output ./publish/scraper
+
+      - name: Deploy to Azure App Service
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: karaparty-scraper
+          publish-profile: ${{ secrets.AZURE_SCRAPER_PUBLISH_PROFILE }}
+          package: ./publish/scraper

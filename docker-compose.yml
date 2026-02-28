@@ -1,0 +1,27 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  scraper:
+    build:
+      context: ./KaraParty.SongScraper
+    environment:
+      RabbitMQ__Host: rabbitmq
+      RabbitMQ__VirtualHost: /
+      RabbitMQ__Username: guest
+      RabbitMQ__Password: guest
+      ConnectionStrings__BlobStorage: ${BLOB_CONNECTION_STRING}
+      GitHubModels__Token: ${GITHUB_TOKEN}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    tmpfs:
+      - /tmp

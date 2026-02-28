@@ -23,8 +23,14 @@ public class SongResult
 
     // Pitch reference (for KaraParty scoring)
     public List<PitchPoint>? PitchReference { get; set; }
+
+    // Audio separation (temp local path, cleared after upload)
+    public string? InstrumentalFilePath { get; set; }
+    public string? VocalsFilePath       { get; set; }
 }
 
-public record LrcLine(double TimestampSeconds, string Text);
+public record LrcWord(double Start, double? End, string Text);
+
+public record LrcLine(double TimestampSeconds, string Text, List<LrcWord>? Words = null);
 
 public record PitchPoint(double T, string Note, double Hz);
