@@ -32,11 +32,11 @@ jobs:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       - name: Deploy to Azure Container Apps
-        uses: azure/container-apps-deploy-action@v1
-        with:
-          resourceGroup: karaparty-rg
-          containerAppName: karaparty-scraper
-          imageToDeploy: ${{ secrets.AZURE_ACR_SERVER }}/karaparty-scraper:${{ github.sha }}
-          registryUrl: ${{ secrets.AZURE_ACR_SERVER }}
-          registryUsername: ${{ secrets.AZURE_ACR_USERNAME }}
-          registryPassword: ${{ secrets.AZURE_ACR_PASSWORD }}
+        run: |
+          az containerapp update \
+            --name karaparty-scraper \
+            --resource-group karaparty-rg \
+            --image ${{ secrets.AZURE_ACR_SERVER }}/karaparty-scraper:${{ github.sha }} \
+            --registry-server ${{ secrets.AZURE_ACR_SERVER }} \
+            --registry-username ${{ secrets.AZURE_ACR_USERNAME }} \
+            --registry-password ${{ secrets.AZURE_ACR_PASSWORD }}
