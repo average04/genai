@@ -12,7 +12,7 @@ using System.ClientModel;
 await Host.CreateDefaultBuilder(args)
     .ConfigureAppConfiguration((_, cfg) =>
     {
-        cfg.AddJsonFile("appsettings.json", optional: false, reloadOnChange: false);
+        cfg.AddJsonFile("appsettings.json", optional: true, reloadOnChange: false);
         cfg.AddUserSecrets<Program>(optional: true);
         cfg.AddEnvironmentVariables();
     })
