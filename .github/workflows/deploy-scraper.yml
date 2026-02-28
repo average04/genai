@@ -12,20 +12,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup .NET 10
-        uses: actions/setup-dotnet@v4
+      - name: Log in to Azure Container Registry
+        uses: docker/login-action@v3
         with:
-          dotnet-version: '10.x'
+          registry: ${{ secrets.AZURE_ACR_SERVER }}
+          username: ${{ secrets.AZURE_ACR_USERNAME }}
+          password: ${{ secrets.AZURE_ACR_PASSWORD }}
 
-      - name: Publish
-        run: |
-          dotnet publish KaraParty.SongScraper/KaraParty.SongScraper.csproj \
-            --configuration Release \
-            --output ./publish/scraper
-
-      - name: Deploy to Azure App Service
-        uses: azure/webapps-deploy@v3
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
         with:
-          app-name: karaparty-scraper
-          publish-profile: ${{ secrets.AZURE_SCRAPER_PUBLISH_PROFILE }}
-          package: ./publish/scraper
+          context: KaraParty.SongScraper
+          push: true
+          tags: ${{ secrets.AZURE_ACR_SERVER }}/karaparty-scraper:${{ github.sha }}
+
+      - name: Log in to Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Deploy to Azure Container Apps
+        uses: azure/container-apps-deploy-action@v1
+        with:
+          resourceGroup: karaparty-rg
+          containerAppName: karaparty-scraper
+          imageToDeploy: ${{ secrets.AZURE_ACR_SERVER }}/karaparty-scraper:${{ github.sha }}
+          registryUrl: ${{ secrets.AZURE_ACR_SERVER }}
+          registryUsername: ${{ secrets.AZURE_ACR_USERNAME }}
+          registryPassword: ${{ secrets.AZURE_ACR_PASSWORD }}
