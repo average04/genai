@@ -33,10 +33,14 @@ jobs:
 
       - name: Deploy to Azure Container Apps
         run: |
+          az containerapp registry set \
+            --name karaparty-scraper \
+            --resource-group karaparty-rg \
+            --server ${{ secrets.AZURE_ACR_SERVER }} \
+            --username ${{ secrets.AZURE_ACR_USERNAME }} \
+            --password ${{ secrets.AZURE_ACR_PASSWORD }}
+
           az containerapp update \
             --name karaparty-scraper \
             --resource-group karaparty-rg \
-            --image ${{ secrets.AZURE_ACR_SERVER }}/karaparty-scraper:${{ github.sha }} \
-            --registry-server ${{ secrets.AZURE_ACR_SERVER }} \
-            --registry-username ${{ secrets.AZURE_ACR_USERNAME }} \
-            --registry-password ${{ secrets.AZURE_ACR_PASSWORD }}
+            --image ${{ secrets.AZURE_ACR_SERVER }}/karaparty-scraper:${{ github.sha }}
